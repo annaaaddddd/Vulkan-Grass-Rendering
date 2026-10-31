@@ -50,9 +50,61 @@ void main() {
 //	}
 //	barrier(); // Wait till all threads reach this point
 
-    // TODO: Apply forces on every blade and update the vertices in the buffer
+    // Apply forces on every blade and update the vertices in the buffer
     uint id = gl_GlobalInvocationID.x;
     if (id >= blades.length()) return;
+
+    Blade blade = blades[id];
+
+    vec3 v0 = blade.v0.xyz; float orientation = blade.v0.w;
+    vec3 v1 = blade.v1.xyz; float height      = blade.v1.w;
+    vec3 v2 = blade.v2.xyz; float width       = blade.v2.w;
+    vec3 up = blade.up.xyz; float stiffness   = blade.up.w;
+
+    vec3 t1 = vec3(cos(orientation), 0.0, sin(orientation));
+    vec3 f  = normalize(cross(up.xyz, t1));
+
+    // 2. gravity, recovery, wind
+    vec4 D = vec4(0, -1, 0, 9.8);
+    vec3 gE = normalize(D.xyz) * D.w;
+    vec3 gF = 0.25 * length(gE) * f;
+    vec3 g = gE + gF;
+
+    vec3 iv2 = v0 + up * height;
+    vec3 r = (iv2 - v2) * stiffness;
+
+    vec3 windDirection = normalize(vec3(1, 0.5, 0));
+    vec3 p = v0.xyz;
+    float strength = 0.5
+        + 0.4 * sin(1.5 * totalTime + 0.8 * (p.x + p.z))
+        + 0.2 * sin(3.7 * totalTime + 1.3 * p.x - 0.6 * p.z);
+    float windStrength = 3.0 * strength;
+    vec3 windForce = windDirection * windStrength;
+
+    float fd = 1.0 - abs(dot(windDirection, normalize(v2 - v0)));
+    float fr = dot(v2 - v0, up) / height;
+    vec3 w = windForce * fd * fr;
+
+    // 3. update v2
+    vec3 tv2 = (g + r + w) * deltaTime;
+    v2 += tv2;
+
+    // 4. state validation
+    v2 = v2 - up * min(dot(up, v2 - v0), 0.0);
+    float lproj = length(v2 - v0 - up * dot(v2 - v0, up));
+    v1 = v0 + height * up * max(1.0 - lproj / height, 0.05 * max(lproj / height, 1.0));
+
+    float L0 = distance(v0, v2);
+    float L1 = distance(v0, v1) + distance(v1, v2);
+    float L  = (2.0 * L0 + L1) / 3.0;
+
+    float ratio = height / L;
+    v1 = v0 + ratio * (v1 - v0);
+    v2 = v1 + ratio * (v2 - v1);
+
+    // 5. update back to blades[] and culledblades[]
+    blades[id].v1.xyz = v1;
+    blades[id].v2.xyz = v2;
     culledBlades[id] = blades[id];
 
 	// TODO: Cull blades that are too far away or not in the camera frustum and write them
